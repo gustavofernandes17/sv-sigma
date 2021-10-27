@@ -1,10 +1,10 @@
 const express = require('express'); 
 const dotEnv = require('dotenv'); 
 const cors = require('cors');
+const MjpegProxy = require('node-mjpeg-proxy'); 
 const { body, validationResult } = require('express-validator');
-const { fork } = require('child_process'); 
-const path = require('path');
 const mqtt = require('mqtt'); 
+const {parse} = require('url'); 
 
 const mqttConfiguration = {
   host: 'broker.hivemq.com', 
@@ -23,11 +23,6 @@ mqttClient = mqtt.connect({
 // configura as variáveis de ambiente
 dotEnv.config();
 
-// cria uma lista para armazenar os subprocessos do servidor proxy
-let currentRunningProxysRunning = [];
-// const proxyServerProcess = 
-
-
 // cria uma aplicação express
 const app = express();
 
@@ -36,10 +31,16 @@ const CONFIG_SERVER_PORT = process.env.PORT || 3333;
 app.use(express.json());
 app.use(cors()); 
 
-app.get('/', (request, response) => {
+// cria uma instância do proxy
+const mjpegProxy = new MjpegProxy('http://mjpeg.sanford.io/count.mjpeg');
 
+// rota comum só para saber se tá tudo certo
+app.get('/', (request, response) => {
   return response.status(200).send(`Servidor de Configuração Rodando na porta ${CONFIG_SERVER_PORT}`);
 })
+
+// rota de streaming do proxy 
+app.get('/stream', mjpegProxy.proxyRequest);
 
 // cria rota de configuração
 app.post(
@@ -55,36 +56,33 @@ app.post(
   if (!errors.isEmpty()) {
     return response.status(400).json({ errors: errors.array() });
   }
-  // fecha o processo atual ou qualquer oultro que esteja rodando no momento
 
-  currentRunningProxysRunning.forEach((process) => {
-    process.send({close: 'close'});
-    process.on('close', (code) => {
-      console.log('processo fechado com sucesso');
-    })
-  }); 
+  console.log(`rota anterior - ${mjpegProxy.mjpegOptions.href}`);
 
-  // limpa o vetor de todos os processos que já foram fechados
-  currentRunningProxysRunning = []; 
+  // atualiza as configuraçãoes
+  mjpegProxy.mjpegOptions = parse(url);
 
-  // cria um novo processo
-  const newProxyServerProcess = fork(path.join(__dirname, `proxy-server.js`));
-  newProxyServerProcess.send({url: url, port: process.env.PROXY_PORT || 8888});
-
-
-  // adiciona o processo atual na lista de processos
-  currentRunningProxysRunning.push(newProxyServerProcess);
-
-  // notifica o SIMOV da alteração na url
-  mqttClient.publish(
-    'controlador/url', 
-    `http://192.168.15.21:${process.env.PROXY_PORT || 8888}/stream`
-  );
+  console.log(`rota atual - ${mjpegProxy.mjpegOptions.href}`);
 
   // caso a configuração ocorra normalmente envia o status de OK
-  return response.status(200).send();
+  return response.status(200).send(`rota alterada com sucesso`);
 }); 
 
+// eventos do proxy
+mjpegProxy.on('streamstart', function(data){
+  console.log("streamstart - " + data);
+});
+
+mjpegProxy.on('streamstop', function(data){
+  console.log("streamstop - " + data);
+});
+
+mjpegProxy.on('error', function(data){
+  console.log("msg: " + data.msg);
+  console.log("url: " + data.url);	
+});
+
+// servidor começa a esperar por requisições
 app.listen(
   CONFIG_SERVER_PORT, 
   () => console.log(`servidor de configuração rodando na porta ${CONFIG_SERVER_PORT}`)
