@@ -31,10 +31,15 @@ let currentRunningProxysRunning = [];
 // cria uma aplicação express
 const app = express();
 
-const CONFIG_SERVER_PORT = process.env.CONFIG_SERVER_PORT || 3333; 
+const CONFIG_SERVER_PORT = process.env.PORT || 3333; 
 
 app.use(express.json());
 app.use(cors()); 
+
+app.get('/', (request, response) => {
+
+  return response.status(200).send(`Servidor de Configuração Rodando na porta ${CONFIG_SERVER_PORT}`);
+})
 
 // cria rota de configuração
 app.post(
